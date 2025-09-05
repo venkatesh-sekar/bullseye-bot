@@ -157,10 +157,6 @@
       <div class="stat">
         <span class="k">Average</span><span class="v" id="avgScore">—</span>
       </div>
-      <button id="nextBtn" title="Spawn a new target in a random spot">
-        Next Target
-      </button>
-      <button id="resetBtn" title="Clear markers and stats">Reset</button>
     </div>
 
     <div id="playfield" aria-label="Mouse Accuracy Playfield"></div>
@@ -182,8 +178,6 @@
 
         // --- State ---
         const playfield = document.getElementById("playfield");
-        const nextBtn = document.getElementById("nextBtn");
-        const resetBtn = document.getElementById("resetBtn");
         const statsEls = {
           lastScore: document.getElementById("lastScore"),
           lastError: document.getElementById("lastError"),
@@ -450,17 +444,10 @@
           showToast(
             `${label}  •  Error ${error.toFixed(1)} px  •  Score ${score}`
           );
+          setTimeout(spawnTarget, 1200);
         }
 
         // --- Bindings ---
-        nextBtn.addEventListener("click", spawnTarget);
-        resetBtn.addEventListener("click", () => {
-          attempts = 0;
-          scoreSum = 0;
-          updateStatsDisplay(null, 0);
-          clearOverlay();
-          showToast("Stats cleared");
-        });
         window.addEventListener("resize", () => {
           // if window shrinks and target could go off-screen, respawn
           const { innerWidth: w, innerHeight: h } = window;
