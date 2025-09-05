@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mouse Accuracy Test</title>
+    <style>
+      :root {
+        --bg: #0b0f19;
+        --panel: #101629;
+        --text: #e7ecf8;
+        --muted: #99a3c2;
+        --accent: #5aa9ff;
+        --ok: #3ad29f;
+        --warn: #ffb25a;
+        --bad: #ff6b6b;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: radial-gradient(
+          1200px 600px at 70% -10%,
+          #131a33 0%,
+          var(--bg) 60%
+        );
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      }
+      #hud {
+        position: fixed;
+        inset: 16px 16px auto 16px;
+        background: rgba(16, 22, 41, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 16px;
+        padding: 12px 14px;
+        backdrop-filter: blur(6px);
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      #hud .stat {
+        display: grid;
+        gap: 2px;
+      }
+      #hud .k {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #hud .v {
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+      #hud button {
+        all: unset;
+        cursor: pointer;
+        background: linear-gradient(180deg, #1a2344, #131b33);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 8px 12px;
+        border-radius: 10px;
+        font-weight: 600;
+      }
+      #hud button:hover {
+        border-color: rgba(255, 255, 255, 0.18);
+        transform: translateY(-0.5px);
+      }
+      #hud .pill {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(90, 169, 255, 0.12);
+        border: 1px solid rgba(90, 169, 255, 0.4);
+        color: #cfe5ff;
+        font-weight: 600;
+      }
+
+      #playfield {
+        position: fixed;
+        inset: 0;
+      }
+      #target {
+        position: absolute;
+        width: 80px;
+        height: 80px; /* will be overridden */
+        display: grid;
+        place-items: center;
+        pointer-events: none; /* clicks go through */
+      }
+      #target svg {
+        width: 100%;
+        height: 100%;
+      }
+      #target .ring {
+        position: absolute;
+        inset: -8px;
+        border: 2px dashed rgba(255, 255, 255, 0.15);
+        border-radius: 16px;
+      }
+      /* marker where the user clicked */
+      .click-dot {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        margin: -5px 0 0 -5px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 3px rgba(90, 169, 255, 0.25);
+        pointer-events: none;
+      }
+      .center-dot {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        margin: -4px 0 0 -4px;
+        border-radius: 50%;
+        background: #fff;
+        pointer-events: none;
+      }
+      .guide-line {
+        position: absolute;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0),
+          rgba(255, 255, 255, 0.7),
+          rgba(255, 255, 255, 0)
+        );
+        transform-origin: left center;
+        pointer-events: none;
+      }
+      #toast {
+        position: fixed;
+        inset: auto 50% 24px auto;
+        transform: translateX(50%);
+        background: rgba(16, 22, 41, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 10px 14px;
+        border-radius: 12px;
+        font-weight: 600;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <span class="pill" id="params"></span>
+      <div class="stat">
+        <span class="k">Last Score</span><span class="v" id="lastScore">—</span>
+      </div>
+      <div class="stat">
+        <span class="k">Error</span><span class="v" id="lastError">—</span>
+      </div>
+      <div class="stat">
+        <span class="k">Attempts</span><span class="v" id="attempts">0</span>
+      </div>
+      <div class="stat">
+        <span class="k">Average</span><span class="v" id="avgScore">—</span>
+      </div>
+      <button id="nextBtn" title="Spawn a new target in a random spot">
+        Next Target
+      </button>
+      <button id="resetBtn" title="Clear markers and stats">Reset</button>
+    </div>
+
+    <div id="playfield" aria-label="Mouse Accuracy Playfield"></div>
+    <div id="toast"></div>
+
+    <script>
+      (function () {
+        // --- URL params ---
+        const url = new URL(location.href);
+        const shape = (url.searchParams.get("shape") || "circle").toLowerCase();
+        const size = Math.max(
+          10,
+          Math.min(400, parseInt(url.searchParams.get("size") || "80", 10))
+        );
+        const safeShapes = new Set(["circle", "square", "triangle"]);
+        const chosenShape = safeShapes.has(shape) ? shape : "circle";
+        const paramsBadge = document.getElementById("params");
+        paramsBadge.textContent = `shape=${chosenShape} • size=${size}px`;
+
+        // --- State ---
+        const playfield = document.getElementById("playfield");
+        const nextBtn = document.getElementById("nextBtn");
+        const resetBtn = document.getElementById("resetBtn");
+        const statsEls = {
+          lastScore: document.getElementById("lastScore"),
+          lastError: document.getElementById("lastError"),
+          attempts: document.getElementById("attempts"),
+          avgScore: document.getElementById("avgScore"),
+        };
+        const toast = document.getElementById("toast");
+
+        let attempts = 0;
+        let scoreSum = 0;
+        let target = null; // DOM node
+        let targetCenter = null; // {x,y}
+        let clickArmed = false;
+
+        // --- Helpers ---
+        function showToast(msg, ms = 1200) {
+          toast.textContent = msg;
+          toast.style.display = "block";
+          clearTimeout(showToast._t);
+          showToast._t = setTimeout(() => (toast.style.display = "none"), ms);
+        }
+
+        function clamp(v, lo, hi) {
+          return Math.max(lo, Math.min(hi, v));
+        }
+
+        function randomTargetPosition(sz) {
+          const padding = 12; // keep a bit away from edges
+          const vpW = window.innerWidth;
+          const vpH = window.innerHeight;
+          const left = Math.floor(
+            padding + Math.random() * (vpW - sz - padding * 2)
+          );
+          const top = Math.floor(
+            padding + Math.random() * (vpH - sz - padding * 2)
+          );
+          return { left, top };
+        }
+
+        function makeTarget(shape, sz) {
+          const div = document.createElement("div");
+          div.id = "target";
+          div.style.width = `${sz}px`;
+          div.style.height = `${sz}px`;
+
+          // SVG shape
+          const svg = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "svg"
+          );
+          svg.setAttribute("viewBox", `0 0 ${sz} ${sz}`);
+          svg.setAttribute("aria-label", `${shape} target`);
+
+          const fill = "#ffffff";
+          const stroke = "#2b3b80";
+
+          if (shape === "circle") {
+            const circle = document.createElementNS(svg.namespaceURI, "circle");
+            const r = sz / 2 - 1.5;
+            circle.setAttribute("cx", sz / 2);
+            circle.setAttribute("cy", sz / 2);
+            circle.setAttribute("r", r);
+            circle.setAttribute("fill", "url(#grad)");
+            circle.setAttribute("stroke", stroke);
+            circle.setAttribute("stroke-width", "2");
+            svg.appendChild(makeGradDef(svg));
+            svg.appendChild(circle);
+            svg.appendChild(makeBullseye(svg, sz));
+          } else if (shape === "square") {
+            const rect = document.createElementNS(svg.namespaceURI, "rect");
+            rect.setAttribute("x", 1.5);
+            rect.setAttribute("y", 1.5);
+            rect.setAttribute("width", sz - 3);
+            rect.setAttribute("height", sz - 3);
+            rect.setAttribute("rx", Math.max(6, sz * 0.08));
+            rect.setAttribute("fill", "url(#grad)");
+            rect.setAttribute("stroke", stroke);
+            rect.setAttribute("stroke-width", "2");
+            svg.appendChild(makeGradDef(svg));
+            svg.appendChild(rect);
+            svg.appendChild(makeBullseye(svg, sz));
+          } else if (shape === "triangle") {
+            // Equilateral triangle inscribed in square
+            const margin = 2;
+            const p1 = `${sz / 2},${margin}`;
+            const p2 = `${sz - margin},${sz - margin}`;
+            const p3 = `${margin},${sz - margin}`;
+            const tri = document.createElementNS(svg.namespaceURI, "polygon");
+            tri.setAttribute("points", `${p1} ${p2} ${p3}`);
+            tri.setAttribute("fill", "url(#grad)");
+            tri.setAttribute("stroke", stroke);
+            tri.setAttribute("stroke-width", "2");
+            svg.appendChild(makeGradDef(svg));
+            svg.appendChild(tri);
+            svg.appendChild(makeBullseye(svg, sz));
+          }
+
+          const ring = document.createElement("div");
+          ring.className = "ring";
+          div.appendChild(ring);
+
+          div.appendChild(svg);
+          return div;
+        }
+
+        function makeGradDef(svg) {
+          const defs = document.createElementNS(svg.namespaceURI, "defs");
+          const grad = document.createElementNS(
+            svg.namespaceURI,
+            "linearGradient"
+          );
+          grad.id = "grad";
+          grad.setAttribute("x1", "0");
+          grad.setAttribute("x2", "0");
+          grad.setAttribute("y1", "0");
+          grad.setAttribute("y2", "1");
+          const s1 = document.createElementNS(svg.namespaceURI, "stop");
+          s1.setAttribute("offset", "0%");
+          s1.setAttribute("stop-color", "#a6c8ff");
+          const s2 = document.createElementNS(svg.namespaceURI, "stop");
+          s2.setAttribute("offset", "100%");
+          s2.setAttribute("stop-color", "#5aa9ff");
+          grad.appendChild(s1);
+          grad.appendChild(s2);
+          defs.appendChild(grad);
+          return defs;
+        }
+
+        function makeBullseye(svg, sz) {
+          const g = document.createElementNS(svg.namespaceURI, "g");
+          const rings = [0.16, 0.32, 0.48]; // relative radii
+          rings.forEach((rel, i) => {
+            const c = document.createElementNS(svg.namespaceURI, "circle");
+            c.setAttribute("cx", sz / 2);
+            c.setAttribute("cy", sz / 2);
+            c.setAttribute("r", (sz / 2) * rel);
+            c.setAttribute("fill", "none");
+            c.setAttribute(
+              "stroke",
+              i === 0 ? "rgba(0,0,0,0.45)" : "rgba(0,0,0,0.25)"
+            );
+            c.setAttribute("stroke-width", "1.5");
+            g.appendChild(c);
+          });
+          return g;
+        }
+
+        function clearOverlay() {
+          document
+            .querySelectorAll(".click-dot,.guide-line,.center-dot")
+            .forEach((n) => n.remove());
+        }
+
+        function lineFromTo(x1, y1, x2, y2) {
+          const dx = x2 - x1,
+            dy = y2 - y1;
+          const len = Math.hypot(dx, dy);
+          const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+          const el = document.createElement("div");
+          el.className = "guide-line";
+          el.style.left = `${x1}px`;
+          el.style.top = `${y1}px`;
+          el.style.width = `${len}px`;
+          el.style.transform = `rotate(${ang}deg)`;
+          return el;
+        }
+
+        function colorForScore(s) {
+          if (s >= 95) return "var(--ok)";
+          if (s >= 70) return "var(--warn)";
+          return "var(--bad)";
+        }
+
+        // score: 100 at perfect center; 0 when error >= (size/2)
+        function scoreFromError(pxError, sz) {
+          const r = sz / 2;
+          const ratio = clamp(pxError / r, 0, 1);
+          return Math.round(100 * (1 - ratio));
+        }
+
+        function updateStatsDisplay(lastScore, pxError) {
+          if (lastScore != null) {
+            statsEls.lastScore.textContent = `${lastScore}`;
+            statsEls.lastScore.style.color = colorForScore(lastScore);
+            statsEls.lastError.textContent = `${pxError.toFixed(1)} px`;
+          }
+          statsEls.attempts.textContent = attempts.toString();
+          statsEls.avgScore.textContent = attempts
+            ? Math.round(scoreSum / attempts).toString()
+            : "—";
+          statsEls.avgScore.style.color = attempts
+            ? colorForScore(scoreSum / attempts)
+            : "inherit";
+        }
+
+        // --- Flow ---
+        function spawnTarget() {
+          clearOverlay();
+          if (target) target.remove();
+
+          target = makeTarget(chosenShape, size);
+          const pos = randomTargetPosition(size);
+          target.style.left = `${pos.left}px`;
+          target.style.top = `${pos.top}px`;
+          playfield.appendChild(target);
+
+          targetCenter = { x: pos.left + size / 2, y: pos.top + size / 2 };
+
+          // draw (hidden) center dot to mark true center when we click
+          const cDot = document.createElement("div");
+          cDot.className = "center-dot";
+          cDot.style.left = `${targetCenter.x}px`;
+          cDot.style.top = `${targetCenter.y}px`;
+          cDot.style.opacity = 0.0;
+          cDot.id = "true-center-dot";
+          document.body.appendChild(cDot);
+
+          clickArmed = true;
+          showToast("Target ready — click the center!");
+        }
+
+        function onClick(ev) {
+          if (!clickArmed) return;
+
+          clickArmed = false;
+
+          const click = { x: ev.clientX, y: ev.clientY };
+          const error = Math.hypot(
+            click.x - targetCenter.x,
+            click.y - targetCenter.y
+          );
+          const score = scoreFromError(error, size);
+
+          // markers
+          const dot = document.createElement("div");
+          dot.className = "click-dot";
+          dot.style.left = `${click.x}px`;
+          dot.style.top = `${click.y}px`;
+          document.body.appendChild(dot);
+
+          const line = lineFromTo(
+            targetCenter.x,
+            targetCenter.y,
+            click.x,
+            click.y
+          );
+          document.body.appendChild(line);
+
+          const centerDot = document.getElementById("true-center-dot");
+          centerDot.style.opacity = 0.9;
+
+          attempts += 1;
+          scoreSum += score;
+          updateStatsDisplay(score, error);
+
+          const label =
+            error < 2
+              ? "Bullseye!"
+              : error < 6
+              ? "Super close!"
+              : error < 12
+              ? "Nice!"
+              : "Keep practicing";
+          showToast(
+            `${label}  •  Error ${error.toFixed(1)} px  •  Score ${score}`
+          );
+        }
+
+        // --- Bindings ---
+        nextBtn.addEventListener("click", spawnTarget);
+        resetBtn.addEventListener("click", () => {
+          attempts = 0;
+          scoreSum = 0;
+          updateStatsDisplay(null, 0);
+          clearOverlay();
+          showToast("Stats cleared");
+        });
+        window.addEventListener("resize", () => {
+          // if window shrinks and target could go off-screen, respawn
+          const { innerWidth: w, innerHeight: h } = window;
+          if (!target) return;
+          const rect = target.getBoundingClientRect();
+          if (rect.right > w || rect.bottom > h) spawnTarget();
+        });
+        window.addEventListener("click", onClick);
+
+        // initial
+        spawnTarget();
+      })();
+    </script>
+  </body>
+</html>
