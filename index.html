@@ -358,11 +358,15 @@
           return Math.round(100 * (1 - ratio));
         }
 
-        function updateStatsDisplay(lastScore, pxError) {
+        function updateStatsDisplay(lastScore, errorMetrics) {
           if (lastScore != null) {
             statsEls.lastScore.textContent = `${lastScore}`;
             statsEls.lastScore.style.color = colorForScore(lastScore);
-            statsEls.lastError.textContent = `${pxError.toFixed(1)} px`;
+            statsEls.lastError.textContent = `x: ${errorMetrics.x.toFixed(
+              1
+            )}, y: ${errorMetrics.y.toFixed(
+              1
+            )} (dist: ${errorMetrics.dist.toFixed(1)} px)`;
           }
           statsEls.attempts.textContent = attempts.toString();
           statsEls.avgScore.textContent = attempts
@@ -405,10 +409,9 @@
           clickArmed = false;
 
           const click = { x: ev.clientX, y: ev.clientY };
-          const error = Math.hypot(
-            click.x - targetCenter.x,
-            click.y - targetCenter.y
-          );
+          const dx = click.x - targetCenter.x;
+          const dy = click.y - targetCenter.y;
+          const error = Math.hypot(dx, dy);
           const score = scoreFromError(error, size);
 
           // markers
@@ -431,7 +434,7 @@
 
           attempts += 1;
           scoreSum += score;
-          updateStatsDisplay(score, error);
+          updateStatsDisplay(score, { dist: error, x: dx, y: dy });
 
           const label =
             error < 2
